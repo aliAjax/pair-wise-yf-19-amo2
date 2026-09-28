@@ -1,128 +1,93 @@
+import { useState } from "react";
 import "./styles.css";
+import ScheduleForm from "./components/ScheduleForm";
+import TaskList from "./components/TaskList";
+import CabinetTimeline from "./components/CabinetTimeline";
+import TaskDetail from "./components/TaskDetail";
+import { metrics } from "./state/selectors";
+import { useSchedule } from "./state/store";
+import type { ReshootReason } from "./types";
 
-const project = {
-  "sourceNo": 9,
-  "id": "hxyfront-62007",
-  "port": 62007,
-  "title": "植物标本馆入库",
-  "domain": "植物标本馆",
-  "prompt": "开发一个植物标本馆压制标本入库前端项目，工作人员可以录入采集号、物种名称、采集地点、海拔、生境描述、采集人、压制状态、鉴定状态和馆藏位置。页面需要有入库队列、鉴定状态筛选、采集地点信息卡、馆藏柜位记录和单份标本详情页。",
-  "palette": [
-    "#166534",
-    "#0f766e",
-    "#ca8a04"
-  ],
-  "metrics": [
-    "入库队列",
-    "待鉴定",
-    "已上柜",
-    "采集点"
-  ],
-  "filters": [
-    "待压制",
-    "待鉴定",
-    "已入库",
-    "需补照"
-  ],
-  "fields": [
-    "采集号",
-    "物种名称",
-    "采集地点",
-    "海拔",
-    "生境描述",
-    "馆藏位置"
-  ],
-  "records": [
-    [
-      "HX-240615-01",
-      "槭属待定",
-      "海拔1420m",
-      "待鉴定"
-    ],
-    [
-      "HX-240615-08",
-      "蕨类",
-      "阴湿沟谷",
-      "已压制"
-    ],
-    [
-      "HX-240616-03",
-      "菊科",
-      "柜位B-12-04",
-      "已入库"
-    ]
-  ]
-};
+export default function App() {
+  const { state, ops, toasts } = useSchedule();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const cards = metrics(state);
 
-function App() {
+  const reject = (id: string, reason: ReshootReason) => ops.reject(id, reason);
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <div className="hero-row">
+          <p>标本馆数字化 · 拍照排期台</p>
+          <button className="ghost" onClick={ops.reset} title="清空本地修改，恢复预置数据">
+            重置演示数据
+          </button>
+        </div>
+        <h1>取件、拍摄、归柜，按柜位时段排开</h1>
+        <span>
+          每项排期写明柜位、优先级与预计时长；同一柜位同一时段只排一项。加急任务插队后，后续普通任务自动顺延并显示新时段。
+          取件即进入拍摄中，归柜前不能再排；照片缺失或标签不清退回补拍，原柜位保留。数据保存在本地，重开页面继续作业。
+        </span>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
+        {cards.map((card) => (
+          <article key={card.label} className={card.tone}>
+            <small>{card.label}</small>
+            <strong>{card.value}</strong>
           </article>
         ))}
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <ScheduleForm state={state} onAdd={ops.add} />
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
+      <CabinetTimeline
+        state={state}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
+
+      <TaskList
+        state={state}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onPickUp={ops.pickUp}
+        onReturn={ops.returnCabinet}
+        onReject={reject}
+        onRequeue={ops.requeue}
+        onCancel={ops.cancel}
+      />
+
+      <section className="panel rules-panel">
+        <p>排期规则说明</p>
+        <ul>
+          <li><b>普通任务</b>：自动排入对应柜位最早空档，按柜位时间先后顺延。</li>
+          <li><b>加急任务</b>：指定插入时段；与拍摄中任务或其他加急任务冲突时拒绝插入；后续普通任务顺延，列表标注新时段与原时段。</li>
+          <li><b>状态流转</b>：已排期 →（取件）拍摄中 →（核验）已归柜；照片缺失 / 标签不清则拍摄中 → 需补拍 → 原柜位重排。</li>
+          <li><b>占用规则</b>：取件后、归柜前同一标本不可再排；需补拍与已归柜不占用拍摄时段。</li>
+        </ul>
       </section>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
+      {selectedId && (
+        <TaskDetail
+          state={state}
+          taskId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onPickUp={ops.pickUp}
+          onReturn={ops.returnCabinet}
+          onReject={reject}
+          onRequeue={ops.requeue}
+        />
+      )}
+
+      <div className="toasts">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`}>
+            {t.kind === "ok" ? "✓" : "!"} {t.text}
           </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+        ))}
+      </div>
     </main>
   );
 }
-
-export default App;
